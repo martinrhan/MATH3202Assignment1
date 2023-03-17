@@ -42,8 +42,6 @@ namespace MATH3202Assignment1 {
                 }).
                 ToArray();
         }
-
-        static bool connectionSet = false;
     }
     internal struct Pipeline {
         public int Node0;

@@ -5,7 +5,9 @@ using MATH3202Assignment1;
 Action[] Communications = {
     () => Model.FromFile1().FindOptimal(false),
     () => Model.FromFile1().FindOptimal(),
-    () => Console.WriteLine(Model.FromFile2().Select(model => model.FindOptimal()).Sum())
+    () => Model.FromFile2().FindOptimal(),
 
 };
+
 Communications[2]();
+//Model.FromFile1Repeat().FindOptimal();
