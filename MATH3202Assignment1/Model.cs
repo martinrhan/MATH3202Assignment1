@@ -69,44 +69,65 @@ namespace MATH3202Assignment1 {
         double GetDemand(int day, int node) => demands[node * DayAmount + day];
         int DayAmount { get; }
 
-        internal double FindOptimal(LogMode logMode = LogMode.Detailed, double pipelineLimit = double.PositiveInfinity, double supplierLimit = double.PositiveInfinity) {
+        internal double FindOptimal(LogMode logMode = LogMode.Detailed,
+            double pipelineLimit = double.PositiveInfinity, double supplierLimit = double.PositiveInfinity, double pipelineImbalanceLimit = 0) {
             GRBModel model = new GRBModel(Env);
-            GRBVar[,] variables = new GRBVar[DayAmount, Pipelines.Length];
-            GRBVar[,] variables_suppliers = new GRBVar[DayAmount, Suppliers.Length];
+            GRBVar[,] variables_time_pipeline_flow = new GRBVar[DayAmount, Pipelines.Length];
+            GRBVar[,] variables_time_supplier = new GRBVar[DayAmount, Suppliers.Length];
+            GRBVar[,] variables_time_pipeline_extraIn = new GRBVar[DayAmount, Pipelines.Length];
+            GRBVar[,] variables_time_pipeline_extraOut = new GRBVar[DayAmount, Pipelines.Length];
             GRBLinExpr[] dailyCosts = new GRBLinExpr[DayAmount];
             for (int i_day = 0; i_day < DayAmount; i_day++) {
                 dailyCosts[i_day] = new GRBLinExpr();
                 for (int i_pipeline = 0; i_pipeline < Pipelines.Length; i_pipeline++) {
                     ref Pipeline pipeline = ref Pipelines[i_pipeline];
-                    variables[i_day, i_pipeline] = model.AddVar(0, pipelineLimit, default, GRB.CONTINUOUS, $"D{i_day}P{pipeline}:{pipeline.Node0}->{pipeline.Node1}");
-                    dailyCosts[i_day].AddTerm(0.01 * Pipelines[i_pipeline].Length, variables[i_day, i_pipeline]);
+                    GRBVar flow = model.AddVar(0, pipelineLimit, default, GRB.CONTINUOUS, $"T{i_day}P{pipeline}:{pipeline.Node0}->{pipeline.Node1}");
+                    variables_time_pipeline_flow[i_day, i_pipeline] = flow;
+                    dailyCosts[i_day].AddTerm(0.01 * Pipelines[i_pipeline].Length, flow);
+                    GRBVar extraIn = model.AddVar(0, pipelineImbalanceLimit, default, GRB.CONTINUOUS, $"T{i_day}P{pipeline}ExI:{pipeline.Node0}->{pipeline.Node1}");
+                    variables_time_pipeline_extraIn[i_day, i_pipeline] = extraIn;
+                    dailyCosts[i_day].AddTerm(0.1, extraIn);
+                    GRBVar extraOut = model.AddVar(0, pipelineImbalanceLimit, default, GRB.CONTINUOUS, $"T{i_day}P{pipeline}ExO:{pipeline.Node0}->{pipeline.Node1}");
+                    variables_time_pipeline_extraOut[i_day, i_pipeline] = extraOut;
+                    dailyCosts[i_day].AddTerm(0.1, extraOut);
+                    model.AddConstr(flow + extraIn + extraOut <= pipelineLimit, $"PipelineConstrant{i_pipeline}");
                 }
                 for (int i_node = 0; i_node < Nodes.Length; i_node++) {
                     ref Node node = ref Nodes[i_node];
                     GRBLinExpr netInflow = new();
                     foreach (int i_pipeline in node.InPipelines) {
-                        netInflow.AddTerm(1, variables[i_day, i_pipeline]);
+                        netInflow.AddTerm(1, variables_time_pipeline_flow[i_day, i_pipeline]);
+                        netInflow.AddTerm(1, variables_time_pipeline_extraOut[i_day, i_pipeline]);
                     }
                     foreach (int i_pipeline in node.OutPipelines) {
-                        netInflow.AddTerm(-1, variables[i_day, i_pipeline]);
+                        netInflow.AddTerm(-1, variables_time_pipeline_flow[i_day, i_pipeline]);
+                        netInflow.AddTerm(-1, variables_time_pipeline_extraIn[i_day, i_pipeline]);
                     }
                     int i_supplier = Enumerable.Range(0, Suppliers.Length).FirstOrDefault(i => Suppliers[i].Node == i_node, -1);
                     if (i_supplier == -1) {
                         model.AddConstr(netInflow >= GetDemand(i_day, i_node), $"DemandConstraintT{i_day}N{i_node}");
                     } else {
                         ref Supplier supplier = ref Suppliers[i_supplier];
-                        variables_suppliers[i_day, i_supplier] = model.AddVar(0, supplier.Capacity, default, GRB.CONTINUOUS, $"S{i_supplier}");
-                        model.AddConstr(netInflow + variables_suppliers[i_day, i_supplier] >= GetDemand(i_day, i_node), $"DemandConstraintT{i_day}N{i_node}");
-                        dailyCosts[i_day].Add(variables_suppliers[i_day, i_supplier] * supplier.Cost);
+                        variables_time_supplier[i_day, i_supplier] = model.AddVar(0, supplier.Capacity, default, GRB.CONTINUOUS, $"S{i_supplier}");
+                        model.AddConstr(netInflow + variables_time_supplier[i_day, i_supplier] >= GetDemand(i_day, i_node), $"DemandConstraintT{i_day}N{i_node}");
+                        dailyCosts[i_day].Add(variables_time_supplier[i_day, i_supplier] * supplier.Cost);
                     }
                 }
             }
             for (int i_supplier = 0; i_supplier < Suppliers.Length; i_supplier++) {
-                GRBLinExpr totalSupply = new ();
+                GRBLinExpr totalSupply = new();
                 for (int i_day = 0; i_day < DayAmount; i_day++) {
-                    totalSupply.AddTerm(1, variables_suppliers[i_day, i_supplier]);
+                    totalSupply.AddTerm(1, variables_time_supplier[i_day, i_supplier]);
                 }
-                model.AddConstr(totalSupply <= supplierLimit, $"SupplierConstraint{i_supplier}");
+                model.AddConstr(totalSupply <= supplierLimit, $"SupplierConstraintS{i_supplier}");
+            }
+            for (int i_pipeline = 0; i_pipeline < Pipelines.Length; i_pipeline++) {
+                GRBLinExpr totalImbalance = new();
+                for (int i_day = 0; i_day < DayAmount; i_day++) {
+                    totalImbalance.AddTerm(1, variables_time_pipeline_extraIn[i_day, i_pipeline]);
+                    totalImbalance.AddTerm(-1, variables_time_pipeline_extraOut[i_day, i_pipeline]);
+                }
+                model.AddConstr(totalImbalance == 0, $"ImbalanceContraintP{i_pipeline}");
             }
             GRBLinExpr totalCost = new GRBLinExpr();
             foreach (GRBLinExpr cost in dailyCosts) totalCost.Add(cost);
@@ -123,16 +144,16 @@ namespace MATH3202Assignment1 {
                     for (int i_node = 0; i_node < Nodes.Length; i_node++) {
                         string[] output;
                         ref Node node = ref Nodes[i_node];
-                        IEnumerable<(int, double)> inflows = node.InPipelines.Select(i => (Pipelines[i].Node0, variables[i_day, i].X)).ToArray();
-                        IEnumerable<(int, double)> outflows = node.OutPipelines.Select(i => (Pipelines[i].Node1, variables[i_day, i].X)).ToArray();
-                        var inflows_simplified = inflows.Where(t => t.Item2.ToString("#.##") != "").ToArray();
-                        var outflows_simplified = outflows.Where(t => t.Item2.ToString("#.##") != "").ToArray();
+                        IEnumerable<(int, double, double)> inflows = node.InPipelines.Select(i => (Pipelines[i].Node0, variables_time_pipeline_flow[i_day, i].X, variables_time_pipeline_extraOut[i_day, i].X)).ToArray();
+                        IEnumerable<(int, double, double)> outflows = node.OutPipelines.Select(i => (Pipelines[i].Node1, variables_time_pipeline_flow[i_day, i].X, variables_time_pipeline_extraIn[i_day, i].X)).ToArray();
+                        var inflows_simplified = inflows.Select(t => (t.Item1, Math.Round(t.Item2, 2), Math.Round(t.Item3, 2))).Where(t => t is not { Item2: 0, Item3: 0 }).ToArray();
+                        var outflows_simplified = outflows.Select(t => (t.Item1, Math.Round(t.Item2, 2), Math.Round(t.Item3, 2))).Where(t => t is not { Item2: 0, Item3: 0 }).ToArray();
                         output = new string[]{
                             i_node.ToString(),
                             "|" + GetDemand(i_day, i_node),
                             "|" + (inflows.Select(t => t.Item2).Sum() - outflows.Select(t => t.Item2).Sum()),
-                            "|" + string.Join(",", inflows_simplified.Select(t => $"{t.Item1}:{t.Item2.ToString("#.##")}")),
-                            "|" + string.Join(",", outflows_simplified.Where(t => t.Item2.ToString("#.##") != "").Select(t => $"{t.Item1}:{t.Item2.ToString("#.##")}")),
+                            "|" + string.Join(",", inflows_simplified.Select(t => $"{t.Item1}:{t.Item2.ToString("0.##")}+{t.Item3.ToString("0.##")}")),
+                            "|" + string.Join(",", outflows_simplified.Select(t => $"{t.Item1}:{t.Item2.ToString("0.##")}+{t.Item3.ToString("0.##")}")),
                             ""
                         };
                         if (inflows_simplified.Select(t => t.Item1).Intersect(outflows_simplified.Select(t => t.Item1)).Any()) {
