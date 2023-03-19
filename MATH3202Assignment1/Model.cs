@@ -4,6 +4,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
+using System.Xml.Linq;
 using static MATH3202Assignment1.Common;
 
 namespace MATH3202Assignment1 {
@@ -86,10 +87,12 @@ namespace MATH3202Assignment1 {
                     dailyCosts[i_day].AddTerm(0.01 * Pipelines[i_pipeline].Length, flow);
                     GRBVar extraIn = model.AddVar(0, pipelineImbalanceLimit, default, GRB.CONTINUOUS, $"T{i_day}P{pipeline}ExI:{pipeline.Node0}->{pipeline.Node1}");
                     variables_time_pipeline_extraIn[i_day, i_pipeline] = extraIn;
-                    dailyCosts[i_day].AddTerm(0.1, extraIn);
+                    //dailyCosts[i_day].AddTerm(0.1, extraIn);
+                    dailyCosts[i_day].AddTerm(0.1 + 0.01 * Pipelines[i_pipeline].Length, extraIn);
                     GRBVar extraOut = model.AddVar(0, pipelineImbalanceLimit, default, GRB.CONTINUOUS, $"T{i_day}P{pipeline}ExO:{pipeline.Node0}->{pipeline.Node1}");
                     variables_time_pipeline_extraOut[i_day, i_pipeline] = extraOut;
-                    dailyCosts[i_day].AddTerm(0.1, extraOut);
+                    //dailyCosts[i_day].AddTerm(0.1, extraOut);
+                    dailyCosts[i_day].AddTerm(0.1 + 0.01 * Pipelines[i_pipeline].Length, extraOut);
                     model.AddConstr(flow + extraIn + extraOut <= pipelineLimit, $"PipelineConstrant{i_pipeline}");
                 }
                 for (int i_node = 0; i_node < Nodes.Length; i_node++) {
@@ -135,32 +138,41 @@ namespace MATH3202Assignment1 {
             model.Optimize();
 
             if (logMode != LogMode.None) {
+                string format = "{0,-5}{1,-8}{2,-8}{3,-20}{4,-20}{5,-20}";
                 for (int i_day = 0; i_day < DayAmount; i_day++) {
                     Console.WriteLine("_______________");
                     Console.WriteLine($"Day{i_day},Cost:{dailyCosts[i_day].Value}");
                     if (logMode == LogMode.Brief) continue;
-                    string format = "{0,-5}{1,-8}{2,-8}{3,-20}{4,-20}{5,-20}";
-                    Console.WriteLine(format, "Node", "|Demand", "|Actual", "|Inflows", "|OutFlows", "|Errors");
+                    Console.WriteLine(format, "Node", "|Demand", "|Actual", "|Inflows", "|Outflows", "|Errors");
+                    List<LogLine> lines = new List<LogLine>();
                     for (int i_node = 0; i_node < Nodes.Length; i_node++) {
-                        string[] output;
                         ref Node node = ref Nodes[i_node];
-                        IEnumerable<(int, double, double)> inflows = node.InPipelines.Select(i => (Pipelines[i].Node0, variables_time_pipeline_flow[i_day, i].X, variables_time_pipeline_extraOut[i_day, i].X)).ToArray();
-                        IEnumerable<(int, double, double)> outflows = node.OutPipelines.Select(i => (Pipelines[i].Node1, variables_time_pipeline_flow[i_day, i].X, variables_time_pipeline_extraIn[i_day, i].X)).ToArray();
-                        var inflows_simplified = inflows.Select(t => (t.Item1, Math.Round(t.Item2, 2), Math.Round(t.Item3, 2))).Where(t => t is not { Item2: 0, Item3: 0 }).ToArray();
-                        var outflows_simplified = outflows.Select(t => (t.Item1, Math.Round(t.Item2, 2), Math.Round(t.Item3, 2))).Where(t => t is not { Item2: 0, Item3: 0 }).ToArray();
-                        output = new string[]{
-                            i_node.ToString(),
-                            "|" + GetDemand(i_day, i_node),
-                            "|" + (inflows.Select(t => t.Item2).Sum() - outflows.Select(t => t.Item2).Sum()),
-                            "|" + string.Join(",", inflows_simplified.Select(t => $"{t.Item1}:{t.Item2.ToString("0.##")}+{t.Item3.ToString("0.##")}")),
-                            "|" + string.Join(",", outflows_simplified.Select(t => $"{t.Item1}:{t.Item2.ToString("0.##")}+{t.Item3.ToString("0.##")}")),
-                            ""
+                        var outflows = node.OutPipelines.Select(i => (Pipelines[i].Node1, variables_time_pipeline_flow[i_day, i].X, variables_time_pipeline_extraIn[i_day, i].X)).ToArray();
+                        var inflows = node.InPipelines.Select(i => (Pipelines[i].Node0, variables_time_pipeline_flow[i_day, i].X, variables_time_pipeline_extraOut[i_day, i].X)).ToArray();
+                        var inflows_rounded = inflows.Select(t => (t.Item1, Math.Round(t.Item2, 2), Math.Round(t.Item3, 2))).Where(t => t is not { Item2: 0, Item3: 0 }).ToArray();
+                        var outflows_rounded = outflows.Select(t => (t.Item1, Math.Round(t.Item2, 2), Math.Round(t.Item3, 2))).Where(t => t is not { Item2: 0, Item3: 0 }).ToArray();
+                        LogLine line = new LogLine() {
+                            Node = i_node,
+                            Demand = GetDemand(i_day, i_node),
+                            Actual = inflows.Select(t => t.Item2 + t.Item3).Sum() - outflows.Select(t => t.Item2 + t.Item3).Sum(),
+                            Inflows = inflows,
+                            Inflows_Rounded = inflows_rounded,
+                            Outflows = outflows,
+                            Outflows_Rounded = outflows_rounded
                         };
-                        if (inflows_simplified.Select(t => t.Item1).Intersect(outflows_simplified.Select(t => t.Item1)).Any()) {
-                            output[^1] = "|ERROR:BidirectionalFlow";
+                        if (inflows_rounded.Select(t => t.Item1).Intersect(outflows_rounded.Select(t => t.Item1)).Any()) {
+                            line.Errors.Add("BidirectionalFlow");
                         }
-                        Console.WriteLine(format, output);
+                        lines.Add(line);
                     }
+                    foreach (LogLine line in lines) {
+                        foreach (var tuple in line.Inflows) {
+                            if (tuple.Item3 == 0) continue;
+                            var tuple_ = lines[tuple.Item1].Outflows.First(t => t.Item1 == line.Node);
+                            if (tuple_.Item3 != 0) line.Errors.Add($"ExInFromN{tuple.Item1}AndExOutAtN{tuple_.Item1}");
+                        }
+                    }
+                    foreach (LogLine line in lines) line.Write("{0,-5}{1,-8}{2,-8}{3,-20}{4,-20}{5,-20}");
                 }
                 Console.WriteLine("OptimalCost:" + model.ObjVal);
                 Console.WriteLine("OptimalCost:" + dailyCosts.Select(c => c.Value).Sum());
@@ -170,4 +182,27 @@ namespace MATH3202Assignment1 {
     }
 
     public enum LogMode { None, Brief, Detailed }
+
+    public class LogLine {
+        public int Node;
+        public double Demand;
+        public double Actual;
+        public required (int, double, double)[] Inflows { get; init; }
+        public required (int, double, double)[] Inflows_Rounded { get; init; }
+        public required (int, double, double)[] Outflows { get; init; }
+        public required (int, double, double)[] Outflows_Rounded { get; init; }
+        public List<string> Errors { get; } = new List<string>();
+
+        public void Write(string format) {
+            var output = new string[]{
+                Node.ToString(),
+                "|" + Demand,
+                "|" + Actual,
+                "|" + string.Join(",", Inflows_Rounded.Select(t => $"{t.Item1}:{t.Item2.ToString("0.##")}+{t.Item3.ToString("0.##")}")),
+                "|" + string.Join(",", Outflows_Rounded.Select(t => $"{t.Item1}:{t.Item2.ToString("0.##")}+{t.Item3.ToString("0.##")}")),
+                "|" + string.Join(",", Errors)
+            };
+            Console.WriteLine(format, output);
+        }
+    }
 }
