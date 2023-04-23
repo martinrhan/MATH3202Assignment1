@@ -23,6 +23,14 @@ namespace MATH3202Assignment1 {
             new(47, 537, 64)
         };
 
+        internal const int UpgradeOptionCount = 3;
+        internal static UpgradeOption[,] UpgradeOptions { get; } = {
+            {new(70, 7078000), new(172, 16121000), new (332, 31947000)},
+            {new(147, 14790000), new(368, 34998000), new (735, 70057000)},
+            {new(158, 15742000), new(381, 38909000), new (771, 71020000)},
+            {new(104, 10640000), new(266, 24392000), new (532, 51764000)}
+        };
+
         internal static IEnumerable<string> ReadLines(string fileName) {
             StreamReader reader;
             string? line;
@@ -30,6 +38,14 @@ namespace MATH3202Assignment1 {
             reader.ReadLine();
             while ((line = reader.ReadLine()) is not null) {
                 yield return line;
+            }
+        }
+
+        internal static IEnumerable<(int, int)> EnumberableRangeTuple(int x, int y) {
+            for (int i = 0; i < x; i++) {
+                for (int j = 0; j < y; j++) {
+                    yield return (i, j);
+                }
             }
         }
 
@@ -65,5 +81,14 @@ namespace MATH3202Assignment1 {
         public int Node;
         public double Capacity;
         public double Cost;
+    }
+
+    internal struct UpgradeOption {
+        public UpgradeOption(double capacity, double cost) {
+            AdditionalCapacity = capacity;
+            Cost = cost;
+        }
+        public double AdditionalCapacity { get; }
+        public double Cost { get; }
     }
 }
