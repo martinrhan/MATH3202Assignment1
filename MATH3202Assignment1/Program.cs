@@ -10,10 +10,13 @@ Action[] Communications = {
     () => Model.FromFile2().FindOptimal(pipelineCapacity: 313, supplierOverallCapacity: 7688, pipelineImbalanceLimit:double.PositiveInfinity),
     () => Model.FromFile3().FindOptimal(supplierUpgrade: true),
     () => Model.FromFile3().FindOptimal(pipelineCapacity: 275, supplierUpgrade: true, pipelineUpgrade: true),
-    () => Model.FromFile3().FindOptimal(pipelineCapacity: 275, supplierUpgrade: true, pipelineUpgrade: true, upgradeDelayDiscount:true)
+    () => Model.FromFile3().FindOptimal(pipelineCapacity: 275, supplierUpgrade: true, pipelineUpgrade: true, upgradeDelayDiscount:true),
+    () => Model.FromFile3().FindOptimal(pipelineCapacity: 275, supplierUpgrade: true, pipelineUpgrade: true, upgradeDelayDiscount:true, uncertianDemandMultipliers:new double[]{1, 0.8, 1.2}),
+    () => Model.FromFile3().FindOptimal(pipelineCapacity: 275, supplierUpgrade: true, pipelineUpgrade: true, upgradeDelayDiscount:true, 
+                                        uncertianDemandMultipliers:new double[]{1, 0.8, 1.2}, undiscountedUpgradeCostSecondPeriodNotMoreThanFirstPeriodTwice:true)
 };
 
-Communications[7]();
+Communications[9]();
 //Model.FromFile2SingleDay(13).FindOptimal();
 //Model.FromFile1Repeat().FindOptimal();
 //Model.FromFile3().FindOptimal(pipelineCapacity: 550, supplierUpgrade: true);
